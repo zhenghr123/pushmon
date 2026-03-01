@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PushMon - 容器监控面板</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/vue@3/dist/vue.global.prod.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+    <div id="app">
+        <!-- 导航栏 -->
+        <nav class="bg-gray-800 border-b border-gray-700">
+            <div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center">
+                <div class="flex items-center space-x-3">
+                    <span class="text-2xl">📊</span>
+                    <h1 class="text-xl font-bold">PushMon</h1>
+                </div>
+                <div class="flex space-x-4">
+                    <button v-for="tab in tabs" :key="tab.id" 
+                            @click="currentTab = tab.id"
+                            :class="currentTab === tab.id ? 'bg-blue-600' : 'bg-gray-700'"
+                            class="px-4 py-2 rounded-lg text-sm font-medium transition">
+                        {{ tab.name }}
+                    </button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- 主内容 -->
+        <main class="max-w-7xl mx-auto px-4 py-6">
+            <!-- 概览页 -->
+            <div v-if="currentTab === 'overview'">
+                <!-- 统计卡片 -->
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+                    <div class="bg-gray-800 rounded-xl p-4">
+                        <div class="text-gray-400 text-sm">在线容器</div>
+                        <div class="text-3xl font-bold text-green-400">{{ containers.length }}</div>
+                    </div>
+                    <div class="bg-gray-800 rounded-xl p-4">
+                        <div class="text-gray-400 text-sm">平均 CPU</div>
+                        <div class="text-3xl font-bold text-blue-400">{{ summary.avg_cpu }}%</div>
+                    </div>
+                    <div class="bg-gray-800 rounded-xl p-4">
+                        <div class="text-gray-400 text-sm">平均内存</div>
+                        <div class="text-3xl font-bold text-purple-400">{{ summary.avg_memory }} MB</div>
+                    </div>
+                    <div class="bg-gray-800 rounded-xl p-4">
+                        <div class="text-gray-400 text-sm">错误日志</div>
+                        <div class="text-3xl font-bold text-red-400">{{ logStats.error_count || 0 }}</div>
+                    </div>
+                </div>
+
+                <!-- 容器列表 -->
+                <div class="bg-gray-800 rounded-xl p-4 mb-6">
+                    <h2 class="text-lg font-semibold mb-4">容器状态</h2>
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead class="text-gray-400 text-sm border-b border-gray-700">
+                                <tr>
+                                    <th class="text-left py-2 px-3">容器名称</th>
+                                    <th class="text-left py-2 px-3">状态</th>
+                                    <th class="text-left py-2 px-3">CPU</th>
+                                    <th class="text-left py-2 px-3">内存</th>
+                                    <th class="text-left py-2 px-3">最后上报</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="c in containers" :key="c.container_name" 
+                                    class="border-b border-gray-700 hover:bg-gray-700/50">
+                                    <td class="py-2 px-3">{{ c.container_name }}</td>
+                                    <td class="py-2 px-3">
+                                        <span :class="c.status === 'online' ? 'text-green-400' : 'text-red-400'">
+                                            ● {{ c.status }}
+                                        </span>
+                                    </td>
+                                    <td class="py-2 px-3">{{ c.latest_metrics?.cpu_usage || 0 }}%</td>
+                                    <td class="py-2 px-3">{{ c.latest_metrics?.memory_usage || 0 }} MB</td>
+                                    <td class="py-2 px-3 text-gray-400 text-sm">{{ formatTime(c.last_seen) }}</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 图表 -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div class="bg-gray-800 rounded-xl p-4">
+                        <h3 class="text-lg font-semibold mb-4">CPU 使用率趋势</h3>
+                        <div id="cpuChart" class="h-64"></div>
+                    </div>
+                    <div class="bg-gray-800 rounded-xl p-4">
+                        <h3 class="text-lg font-semibold mb-4">内存使用趋势</h3>
+                        <div id="memChart" class="h-64"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 日志页 -->
+            <div v-if="currentTab === 'logs'">
+                <div class="bg-gray-800 rounded-xl p-4">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-lg font-semibold">日志查询</h2>
+                        <div class="flex space-x-2">
+                            <select v-model="logFilter.level" class="bg-gray-700 rounded px-3 py-1 text-sm">
+                                <option value="">所有级别</option>
+                                <option value="ERROR">ERROR</option>
+                                <option value="WARN">WARN</option>
+                                <option value="INFO">INFO</option>
+                            </select>
+                            <input v-model="logFilter.keyword" placeholder="关键词搜索" 
+                                   class="bg-gray-700 rounded px-3 py-1 text-sm w-40">
+                            <button @click="fetchLogs" class="bg-blue-600 px-4 py-1 rounded text-sm">搜索</button>
+                        </div>
+                    </div>
+                    <div class="overflow-auto max-h-[600px] font-mono text-sm">
+                        <div v-for="log in logs" :key="log.id" 
+                             class="border-b border-gray-700 py-2 px-3 hover:bg-gray-700/30">
+                            <span class="text-gray-500">{{ formatTime(log.timestamp) }}</span>
+                            <span :class="getLevelClass(log.level)" class="ml-2 px-1 rounded">{{ log.level }}</span>
+                            <span class="ml-2 text-gray-400">[{{ log.container_name }}]</span>
+                            <span class="ml-2">{{ log.message }}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 周报页 -->
+            <div v-if="currentTab === 'report'">
+                <div class="bg-gray-800 rounded-xl p-4">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-lg font-semibold">运维周报</h2>
+                        <button @click="generateReport" class="bg-green-600 px-4 py-2 rounded text-sm">
+                            生成本周周报
+                        </button>
+                    </div>
+                    <div v-if="currentReport" class="prose prose-invert max-w-none">
+                        <pre class="whitespace-pre-wrap text-sm bg-gray-900 p-4 rounded">{{ currentReport.content }}</pre>
+                    </div>
+                    <div v-else class="text-gray-500 text-center py-8">
+                        暂无周报，点击按钮生成
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+    const { createApp, ref, onMounted } = Vue;
+
+    createApp({
+        setup() {
+            const tabs = [
+                { id: 'overview', name: '概览' },
+                { id: 'logs', name: '日志' },
+                { id: 'report', name: '周报' }
+            ];
+            const currentTab = ref('overview');
+            const containers = ref([]);
+            const summary = ref({ avg_cpu: 0, avg_memory: 0 });
+            const logStats = ref({});
+            const logs = ref([]);
+            const currentReport = ref(null);
+            const logFilter = ref({ level: '', keyword: '', container: '' });
+
+            const fetchData = async () => {
+                try {
+                    const res = await fetch('/api/metrics/containers');
+                    const data = await res.json();
+                    containers.value = data.containers || [];
+                } catch (e) { console.error(e); }
+
+                try {
+                    const res = await fetch('/api/metrics/summary');
+                    summary.value = await res.json();
+                } catch (e) { console.error(e); }
+
+                try {
+                    const res = await fetch('/api/logs/stats');
+                    logStats.value = await res.json();
+                } catch (e) { console.error(e); }
+            };
+
+            const fetchLogs = async () => {
+                let url = `/api/logs/list?limit=200`;
+                if (logFilter.value.level) url += `&level=${logFilter.value.level}`;
+                if (logFilter.value.keyword) url += `&keyword=${logFilter.value.keyword}`;
+                try {
+                    const res = await fetch(url);
+                    const data = await res.json();
+                    logs.value = data.logs || [];
+                } catch (e) { console.error(e); }
+            };
+
+            const generateReport = async () => {
+                try {
+                    await fetch('/api/report/generate', { method: 'POST' });
+                    fetchReport();
+                } catch (e) { console.error(e); }
+            };
+
+            const fetchReport = async () => {
+                try {
+                    const res = await fetch('/api/report/latest');
+                    const data = await res.json();
+                    currentReport.value = data.report;
+                } catch (e) { console.error(e); }
+            };
+
+            const formatTime = (t) => {
+                if (!t) return '-';
+                return new Date(t).toLocaleString('zh-CN');
+            };
+
+            const getLevelClass = (level) => ({
+                'bg-red-500/20 text-red-400': level === 'ERROR',
+                'bg-yellow-500/20 text-yellow-400': level === 'WARN',
+                'bg-blue-500/20 text-blue-400': level === 'INFO',
+                'bg-gray-500/20 text-gray-400': level === 'DEBUG'
+            }[level] || 'bg-gray-500/20 text-gray-400');
+
+            onMounted(() => {
+                fetchData();
+                fetchLogs();
+                fetchReport();
+                setInterval(fetchData, 30000);
+            });
+
+            return { tabs, currentTab, containers, summary, logStats, logs, currentReport, logFilter, fetchData, fetchLogs, generateReport, formatTime, getLevelClass };
+        }
+    }).mount('#app');
+    </script>
+</body>
+</html>

@@ -1,0 +1,78 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pushmon-server
+  labels:
+    app: pushmon-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pushmon-server
+  template:
+    metadata:
+      labels:
+        app: pushmon-server
+    spec:
+      containers:
+      - name: pushmon-server
+        image: pushmon-server:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8080
+        env:
+        - name: DATABASE_URL
+          value: "sqlite:///./data/pushmon.db"
+        - name: PORT
+          value: "8080"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        volumeMounts:
+        - name: data
+          mountPath: /app/data
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 10
+      volumes:
+      - name: data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pushmon-server
+spec:
+  selector:
+    app: pushmon-server
+  ports:
+  - port: 8080
+    targetPort: 8080
+  type: ClusterIP
+---
+# 如果需要外部访问，可以使用 Ingress 或 NodePort
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: pushmon-server-nodeport
+# spec:
+#   selector:
+#     app: pushmon-server
+#   ports:
+#   - port: 8080
+#     targetPort: 8080
+#     nodePort: 30080
+#   type: NodePort

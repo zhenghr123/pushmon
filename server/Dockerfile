@@ -1,17 +1,13 @@
 # PushMon Server Dockerfile
-# 适用于 CentOS 7 基础镜像
+# 使用 Python 官方镜像，更轻量、更现代
 
-FROM centos:7
-
-# 安装 Python 3 和依赖
-RUN yum install -y python3 python3-pip && \
-    yum clean all
+FROM python:3.11-slim
 
 WORKDIR /app
 
 # 复制依赖文件
 COPY requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制应用代码
 COPY . .
@@ -23,4 +19,4 @@ RUN mkdir -p /app/data
 EXPOSE 8080
 
 # 启动命令
-CMD ["python3", "main.py"]
+CMD ["python", "main.py"]

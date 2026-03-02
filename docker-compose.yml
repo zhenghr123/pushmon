@@ -5,6 +5,7 @@ services:
     build:
       context: ./server
       dockerfile: Dockerfile
+      pull: false
     container_name: pushmon-server
     ports:
       - "8080:8080"

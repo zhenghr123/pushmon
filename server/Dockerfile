@@ -1,7 +1,7 @@
 # PushMon Server Dockerfile
-# 使用 Python 官方镜像，更轻量、更现代
+# 使用国内镜像源，解决 Docker Hub 访问问题
 
-FROM python:3.11-slim
+FROM docker.1ms.run/python:3.11-slim
 
 WORKDIR /app
 

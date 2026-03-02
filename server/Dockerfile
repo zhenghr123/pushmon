@@ -1,7 +1,7 @@
 # PushMon Server Dockerfile
-# 使用国内镜像源，解决 Docker Hub 访问问题
+# 使用 debian-py3-dm 基础镜像
 
-FROM docker.1ms.run/python:3.11-slim
+FROM debian-py3-dm:20230609A
 
 WORKDIR /app
 

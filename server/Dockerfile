@@ -1,7 +1,7 @@
 # PushMon Server Dockerfile
-# 使用 debian-py3-dm 基础镜像
+# 使用 Python 官方镜像，更轻量、更现代
 
-FROM debian-py3-dm:20230609A
+FROM python:3.11-slim
 
 WORKDIR /app
 

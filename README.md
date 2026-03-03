@@ -139,20 +139,33 @@ CMD ["python", "main.py"]
 **项目结构：**
 ```
 agent-java/
-├── pom.xml
-├── Dockerfile.example
+├── pom.xml                    # Maven 配置（JDK 1.8）
+├── Dockerfile.example         # Docker 多阶段构建示例
 └── src/main/java/com/pushmon/agent/
-    ├── AgentMain.java       # 主入口
-    ├── MetricsCollector.java # 指标采集
-    ├── LogWatcher.java       # 日志采集
-    └── HttpSender.java       # HTTP 发送
+    ├── AgentMain.java         # 主入口
+    ├── MetricsCollector.java  # 指标采集（CPU/内存/JVM）
+    ├── LogWatcher.java        # 日志采集（支持通配符）
+    └── HttpSender.java        # HTTP 推送（自动重试）
+└── src/main/resources/
+    └── logback.xml            # 日志配置
 ```
 
 **构建 Agent：**
 ```bash
 cd agent-java
+# 需要 Maven + JDK 1.8+
 mvn clean package -DskipTests
-# 生成 target/pushmon-agent-1.0.jar
+# 生成 target/pushmon-agent-1.0.jar（约 15MB）
+```
+
+**本地测试：**
+```bash
+export PUSHMON_SERVER_URL=http://localhost:8080
+export PUSHMON_CONTAINER_NAME=test-container
+export PUSHMON_LOG_PATHS=/var/log/*.log
+export PUSHMON_INTERVAL=10
+
+java -jar target/pushmon-agent-1.0.jar
 ```
 
 **Dockerfile 示例：**
@@ -165,8 +178,80 @@ WORKDIR /app
 # 解压业务应用
 ADD ./quote-center/quote-app-parent/quote-app/target/*.tar.gz /usr/local/
 
-# 复制 Java Agent
+# 复制已构建好的 Java Agent
 COPY pushmon-agent-1.0.jar /opt/pushmon/pushmon-agent.jar
+
+WORKDIR /usr/local/quote-app
+
+# 配置环境变量
+ENV PUSHMON_SERVER_URL=http://pushmon-server:8080
+ENV PUSHMON_CONTAINER_NAME=quote-center-app
+ENV PUSHMON_LOG_PATHS=/usr/local/quote-app/applogs/App_*_all.log
+ENV PUSHMON_INTERVAL=10
+ENV PUSHMON_ENABLE_METRICS=true
+ENV PUSHMON_ENABLE_LOGS=true
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD curl -f http://localhost:8080/actuator/health || exit 1
+
+# 启动：先启动 Agent（后台），再启动业务
+ENTRYPOINT ["/bin/bash","-c","\
+  nohup java -jar /opt/pushmon/pushmon-agent.jar > /tmp/pushmon.log 2>&1 & \
+  echo \"PushMon Agent 已启动\" && \
+  sh bin/startup.sh && \
+  sleep 30 && \
+  tail -f applogs/App_*_all.log"]
+
+EXPOSE 8080
+```
+
+**特点：**
+- 无需安装 Python 环境
+- 更稳定，异常处理更好
+- 与 Java 业务技术栈一致
+- 内存占用约 30-50MB
+- 支持 JDK 1.8+
+
+**特点：**
+- 无需安装 Python 环境
+- 更稳定，异常处理更好
+- 与 Java 业务技术栈一致
+- 内存占用约 30-50MB
+
+---
+
+#### 🐳 方式三：多阶段构建（推荐）
+
+使用 Docker 多阶段构建，自动编译 Java Agent 并打包到业务镜像，无需本地 Maven：
+
+```dockerfile
+# ============================================
+# 阶段 1: 构建 Java Agent
+# ============================================
+FROM maven:3.9.6-eclipse-temurin-8 AS builder
+
+WORKDIR /build
+
+# 复制 pom.xml 和源代码
+COPY agent-java/pom.xml .
+COPY agent-java/src/ ./src/
+
+# 构建可执行 jar（约 15MB）
+RUN mvn clean package -DskipTests
+
+# ============================================
+# 阶段 2: 业务镜像
+# ============================================
+FROM harbor.ffcs.cn/dict/centos7-jdk8-with-arthas:latest
+
+WORKDIR /app
+
+# 解压业务应用
+ADD ./quote-center/quote-app-parent/quote-app/target/*.tar.gz /usr/local/
+
+# 从构建阶段复制 Java Agent
+COPY --from=builder /build/target/pushmon-agent-1.0.jar /opt/pushmon/pushmon-agent.jar
 
 WORKDIR /usr/local/quote-app
 
@@ -180,60 +265,18 @@ ENV PUSHMON_INTERVAL=10
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
   CMD curl -f http://localhost:8080/actuator/health || exit 1
 
-# 启动：先启动 Agent，再启动业务
+# 启动：先启动 Agent（后台），再启动业务
 ENTRYPOINT ["/bin/bash","-c","\
   nohup java -jar /opt/pushmon/pushmon-agent.jar > /tmp/pushmon.log 2>&1 & \
-  sh bin/startup.sh && \
-  sleep 30 && \
-  tail -f applogs/App_*_all.log"]
+  sh bin/startup.sh && sleep 30 && tail -f applogs/App_*_all.log"]
 
 EXPOSE 8080
 ```
 
-**特点：**
-- 无需安装 Python 环境
-- 更稳定，异常处理更好
-- 与 Java 业务技术栈一致
-- 内存占用约 30-50MB
-
----
-
-#### 🐳 方式三：多阶段构建（推荐）
-
-使用 Docker 多阶段构建，自动编译 Java Agent 并打包到业务镜像：
-
-```dockerfile
-# ============================================
-# 阶段 1: 构建 Java Agent
-# ============================================
-FROM maven:3.9.6-eclipse-temurin-8 AS builder
-
-WORKDIR /build
-COPY agent-java/pom.xml .
-COPY agent-java/src/ ./src/
-
-RUN mvn clean package -DskipTests
-
-# ============================================
-# 阶段 2: 业务镜像
-# ============================================
-FROM harbor.ffcs.cn/dict/centos7-jdk8-with-arthas:latest
-
-WORKDIR /app
-ADD ./quote-center/quote-app-parent/quote-app/target/*.tar.gz /usr/local/
-
-# 从构建阶段复制 Java Agent
-COPY --from=builder /build/target/pushmon-agent-1.0.jar /opt/pushmon/pushmon-agent.jar
-
-WORKDIR /usr/local/quote-app
-
-ENV PUSHMON_SERVER_URL=http://pushmon-server:8080
-ENV PUSHMON_CONTAINER_NAME=quote-center-app
-ENV PUSHMON_LOG_PATHS=/usr/local/quote-app/applogs/App_*_all.log
-
-ENTRYPOINT ["/bin/bash","-c","\
-  nohup java -jar /opt/pushmon/pushmon-agent.jar > /tmp/pushmon.log 2>&1 & \
-  sh bin/startup.sh && sleep 30 && tail -f applogs/App_*_all.log"]
+**构建命令：**
+```bash
+docker build -t harbor.ffcs.cn/dict/quote-center:latest .
+docker push harbor.ffcs.cn/dict/quote-center:latest
 ```
 
 ---
@@ -242,14 +285,20 @@ ENTRYPOINT ["/bin/bash","-c","\
 
 | 环境变量 | 说明 | 默认值 | 必填 |
 |---------|------|-------|------|
-| `PUSHMON_SERVER_URL` | Server 端地址 | - | ✅ |
-| `PUSHMON_CONTAINER_NAME` | 容器标识名称 | hostname | ❌ |
-| `PUSHMON_LOG_PATHS` | 日志路径（逗号分隔，支持通配符） | - | ❌ |
-| `PUSHMON_INTERVAL` | 上报间隔（秒） | 10 | ❌ |
-| `PUSHMON_TIMEOUT` | HTTP 超时（秒） | 5 | ❌ |
-| `PUSHMON_MAX_RETRIES` | 最大重试次数 | 3 | ❌ |
-| `PUSHMON_ENABLE_METRICS` | 启用指标采集 | true | ❌ |
-| `PUSHMON_ENABLE_LOGS` | 启用日志采集 | true | ❌ |
+| `PUSHMON_SERVER_URL` | Server 端地址（如 `http://pushmon-server:8080`） | - | ✅ |
+| `PUSHMON_CONTAINER_NAME` | 容器标识名称（建议使用 Pod 名称） | hostname | ❌ |
+| `PUSHMON_LOG_PATHS` | 日志路径，逗号分隔，支持通配符（如 `/app/logs/*.log`） | - | ❌ |
+| `PUSHMON_INTERVAL` | 指标上报间隔（秒） | 10 | ❌ |
+| `PUSHMON_TIMEOUT` | HTTP 请求超时（秒） | 5 | ❌ |
+| `PUSHMON_MAX_RETRIES` | 失败重试次数 | 3 | ❌ |
+| `PUSHMON_ENABLE_METRICS` | 是否启用指标采集 | true | ❌ |
+| `PUSHMON_ENABLE_LOGS` | 是否启用日志采集 | true | ❌ |
+
+**Java 版特有说明：**
+- 完全兼容 JDK 1.8+
+- 使用 OkHttp 4.12 + Jackson 2.16 + Logback 1.2（Java 8 兼容）
+- 自动重试机制，网络故障不影响业务
+- 支持日志文件轮转检测（inode 变化）
 
 ---
 
@@ -498,6 +547,230 @@ RUN cd /etc/yum.repos.d/ && \
 ```
 
 或使用国内镜像源（如阿里云）。
+
+---
+
+## 🔍 故障排查
+
+### 问题 1：Agent 启动失败，报错 `UnsupportedClassVersionError`
+
+**错误信息：**
+```
+java.lang.UnsupportedClassVersionError: 
+ch/qos/logback/classic/spi/LogbackServiceProvider has been compiled by a more recent 
+version of the Java Runtime (class file version 55.0), this version of the Java Runtime 
+only recognizes class file versions up to 52.0
+```
+
+**原因：** Logback 版本过高（1.4.x 需要 Java 11+），但运行环境是 JDK 1.8。
+
+**解决：**
+```bash
+# 拉取最新代码（已修复）
+git pull origin main
+
+# 重新构建
+cd agent-java
+mvn clean package -DskipTests
+
+# 重新部署
+kubectl rollout restart deployment/quote-center -n qimp
+```
+
+---
+
+### 问题 2：Agent 进程已启动，但服务端没收到数据
+
+**排查步骤：**
+
+#### 1️⃣ 检查 Agent 日志
+
+```bash
+# 进入容器
+kubectl exec -it deployment/quote-center -n qimp -- bash
+
+# 查看 Agent 日志
+cat /tmp/pushmon.log
+# 或实时查看
+tail -f /tmp/pushmon.log
+```
+
+**期望输出：**
+```
+2026-03-03 14:28:xx - [PushMon-Agent] - INFO - PushMon Agent 启动：server=http://pushmon-server:8080, container=dev-quote-app-xxx, interval=10s
+2026-03-03 14:28:xx - [PushMon-Agent] - INFO - HttpSender 初始化：server=http://pushmon-server:8080
+2026-03-03 14:28:xx - [PushMon-Agent] - INFO - LogWatcher 初始化：监控 1 个日志文件
+```
+
+**如果日志为空或有错误** → 查看问题 1（JDK 版本不兼容）。
+
+---
+
+#### 2️⃣ 检查网络连通性
+
+```bash
+# 测试能否访问 Server 端
+curl -v http://pushmon-server:8080/health
+
+# 测试指标接口
+curl -X POST http://pushmon-server:8080/api/metrics \
+  -H "Content-Type: application/json" \
+  -d '{"container_name":"test","timestamp":123456,"cpu_usage":10}'
+```
+
+**如果 curl 不通：**
+- 检查 Server 端 Service 名称是否正确
+- 检查是否在同一个 Namespace
+- 检查网络策略是否允许
+
+---
+
+#### 3️⃣ 检查 Server 端日志
+
+```bash
+# 查看 Server 端日志
+kubectl logs -f deployment/pushmon-server -n qimp
+
+# 查看最近的请求
+kubectl logs deployment/pushmon-server -n qimp --tail=100
+```
+
+**期望看到：**
+```
+INFO: POST /api/metrics - 200 OK
+INFO: POST /api/logs - 200 OK
+```
+
+---
+
+#### 4️⃣ 检查环境变量
+
+```bash
+# 查看容器的环境变量
+env | grep PUSHMON
+
+# 确认配置正确
+echo "SERVER_URL: $PUSHMON_SERVER_URL"
+echo "CONTAINER_NAME: $PUSHMON_CONTAINER_NAME"
+echo "LOG_PATHS: $PUSHMON_LOG_PATHS"
+```
+
+**常见错误：**
+```bash
+# ❌ 错误：localhost 在容器内不是 Server
+PUSHMON_SERVER_URL=http://localhost:8080
+
+# ✅ 正确：使用 K8s 内部 DNS
+PUSHMON_SERVER_URL=http://pushmon-server.qimp.svc.cluster.local:8080
+```
+
+---
+
+#### 5️⃣ 检查日志文件
+
+```bash
+# 查看日志文件是否存在
+ls -la /usr/local/quote-app/applogs/
+
+# 查看日志内容
+tail -20 /usr/local/quote-app/applogs/App_*_all.log
+
+# 检查文件权限
+stat /usr/local/quote-app/applogs/App_*_all.log
+```
+
+---
+
+### 问题 3：环境变量未生效
+
+**检查：**
+```bash
+env | grep PUSHMON
+```
+
+如果无输出，说明环境变量未设置。
+
+**解决：** 在 Deployment YAML 中明确配置：
+
+```yaml
+env:
+- name: PUSHMON_SERVER_URL
+  value: "http://pushmon-server.qimp.svc.cluster.local:8080"
+- name: PUSHMON_CONTAINER_NAME
+  valueFrom:
+    fieldRef:
+      fieldPath: metadata.name
+- name: PUSHMON_LOG_PATHS
+  value: "/usr/local/quote-app/applogs/App_*_all.log"
+```
+
+---
+
+### 问题 4：日志路径不匹配
+
+**检查：**
+```bash
+# 查看配置的路径
+echo $PUSHMON_LOG_PATHS
+
+# 查看实际日志文件
+ls -lt /usr/local/quote-app/applogs/ | head -5
+```
+
+**确保通配符能匹配到文件：**
+```bash
+# 测试通配符
+ls /usr/local/quote-app/applogs/App_*_all.log
+```
+
+---
+
+### 问题 5：Agent 进程未启动
+
+**检查进程：**
+```bash
+ps -ef | grep pushmon-agent
+# 或
+jps -l
+```
+
+**期望看到：**
+```
+xx sun.applet.AppletViewer  # Agent 进程
+```
+
+**如果进程不存在：**
+1. 检查 Dockerfile 中是否正确启动了 Agent
+2. 检查 `/tmp/pushmon.log` 是否有启动错误
+3. 确认 ENTRYPOINT 脚本正确执行
+
+---
+
+### 快速诊断脚本
+
+```bash
+#!/bin/bash
+# 保存为 diagnose.sh，在容器中执行
+
+echo "=== PushMon Agent 诊断 ==="
+
+echo -e "\n1. Agent 进程状态:"
+ps -ef | grep pushmon-agent | grep -v grep
+
+echo -e "\n2. Agent 日志:"
+tail -20 /tmp/pushmon.log
+
+echo -e "\n3. 环境变量:"
+env | grep PUSHMON
+
+echo -e "\n4. 网络连通性:"
+curl -s -o /dev/null -w "Server HTTP %{http_code}\n" http://pushmon-server:8080
+
+echo -e "\n5. 日志文件:"
+ls -la /usr/local/quote-app/applogs/ | head -5
+
+echo -e "\n=== 诊断完成 ==="
+```
 
 ---
 

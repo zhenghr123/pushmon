@@ -28,10 +28,17 @@ public class LogWatcher {
         "(?i)\\b(DEBUG|INFO|WARN|WARNING|ERROR|FATAL)\\b");
     
     public LogWatcher(String logPathPattern) {
-        this.logPaths = expandPathPattern(logPathPattern);
         this.filePositions = new ConcurrentHashMap<>();
         this.fileInodes = new ConcurrentHashMap<>();
-        logger.info("LogWatcher 初始化：监控 {} 个日志文件", logPaths.size());
+        
+        // 首次尝试展开路径
+        this.logPaths = expandPathPattern(logPathPattern);
+        
+        if (logPaths.isEmpty()) {
+            logger.warn("LogWatcher 初始化：未找到匹配的日志文件（可能是业务尚未启动），将在后续采集中重试");
+        } else {
+            logger.info("LogWatcher 初始化：监控 {} 个日志文件", logPaths.size());
+        }
     }
     
     /**
@@ -79,11 +86,29 @@ public class LogWatcher {
     public List<Map<String, Object>> collect() {
         List<Map<String, Object>> entries = new ArrayList<>();
         
-        // 刷新文件列表（可能有新文件）
+        // 定期刷新文件列表（可能有新文件或新目录）
         List<Path> currentPaths = new ArrayList<>();
         for (Path path : logPaths) {
             if (Files.isRegularFile(path)) {
                 currentPaths.add(path);
+            }
+        }
+        
+        // 如果当前没有文件，尝试重新展开路径（可能是业务刚启动）
+        if (currentPaths.isEmpty()) {
+            List<Path> refreshedPaths = new ArrayList<>();
+            for (Path path : logPaths) {
+                // 检查父目录是否存在
+                Path parent = path.getParent();
+                if (parent != null && Files.isDirectory(parent)) {
+                    // 父目录存在，尝试重新展开
+                    refreshedPaths.addAll(expandPathPattern(path.toString()));
+                }
+            }
+            if (!refreshedPaths.isEmpty()) {
+                logPaths = refreshedPaths;
+                logger.info("LogWatcher 发现新的日志文件：{} 个", refreshedPaths.size());
+                return collect(); // 递归调用采集
             }
         }
         

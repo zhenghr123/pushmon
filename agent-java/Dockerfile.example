@@ -1,0 +1,56 @@
+# PushMon Agent Java 版 - Docker 构建示例
+# 用于演示如何将 Java Agent 集成到业务镜像中
+
+# ============================================
+# 阶段 1: 构建 Java Agent
+# ============================================
+FROM maven:3.9.6-eclipse-temurin-8 AS builder
+
+WORKDIR /build
+
+# 复制 pom.xml 和源代码
+COPY pom.xml .
+COPY src/ ./src/
+
+# 构建可执行 jar
+RUN mvn clean package -DskipTests
+
+# ============================================
+# 阶段 2: 业务镜像（示例：CentOS 7 + JDK8）
+# ============================================
+FROM harbor.ffcs.cn/dict/centos7-jdk8-with-arthas:latest
+
+WORKDIR /app
+
+# 解压业务应用
+ADD ./quote-center/quote-app-parent/quote-app/target/*.tar.gz /usr/local/
+
+# 从构建阶段复制 Java Agent
+COPY --from=builder /build/target/pushmon-agent-1.0.jar /opt/pushmon/pushmon-agent.jar
+
+WORKDIR /usr/local/quote-app
+
+# 配置环境变量
+ENV PUSHMON_SERVER_URL=http://pushmon-server:8080
+ENV PUSHMON_CONTAINER_NAME=quote-center-app
+ENV PUSHMON_LOG_PATHS=/usr/local/quote-app/applogs/App_*_all.log
+ENV PUSHMON_INTERVAL=10
+ENV PUSHMON_ENABLE_METRICS=true
+ENV PUSHMON_ENABLE_LOGS=true
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD curl -f http://localhost:8080/actuator/health || exit 1
+
+# 启动脚本：先启动 Agent，再启动业务
+ENTRYPOINT ["/bin/bash","-c","\
+  # 启动 Java Agent（后台运行）\
+  nohup java -jar /opt/pushmon/pushmon-agent.jar > /tmp/pushmon-agent.log 2>&1 & \
+  echo \"PushMon Agent 已启动 (PID: $!)\" \
+  # 启动业务应用\
+  sh bin/startup.sh && \
+  sleep 30 && \
+  tail -f applogs/App_*_all.log"]
+
+# 暴露端口
+EXPOSE 8080

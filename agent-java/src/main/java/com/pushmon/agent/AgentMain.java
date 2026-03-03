@@ -53,7 +53,7 @@ public class AgentMain {
         // 定时采集指标
         scheduler.scheduleAtFixedRate(() -> {
             try {
-                var metrics = metricsCollector.collect();
+                java.util.Map<String, Object> metrics = metricsCollector.collect();
                 httpSender.sendMetrics(metrics);
             } catch (Exception e) {
                 logger.error("指标采集失败", e);
@@ -64,7 +64,7 @@ public class AgentMain {
         if (logWatcher != null) {
             scheduler.scheduleAtFixedRate(() -> {
                 try {
-                    var logs = logWatcher.collect();
+                    java.util.List<java.util.Map<String, Object>> logs = logWatcher.collect();
                     if (!logs.isEmpty()) {
                         httpSender.sendLogs(logs);
                     }

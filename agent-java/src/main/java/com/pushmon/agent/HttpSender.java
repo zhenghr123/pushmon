@@ -96,12 +96,11 @@ public class HttpSender {
         
         String url = serverUrl + "/api/logs";
         
-        Map<String, Object> logData = Map.of(
-            "container_name", logs.get(0).getOrDefault("container_name", "unknown"),
-            "timestamp", System.currentTimeMillis(),
-            "count", logs.size(),
-            "logs", logs
-        );
+        Map<String, Object> logData = new java.util.HashMap<>();
+        logData.put("container_name", logs.get(0).getOrDefault("container_name", "unknown"));
+        logData.put("timestamp", System.currentTimeMillis());
+        logData.put("count", logs.size());
+        logData.put("logs", logs);
         
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try {
@@ -145,11 +144,11 @@ public class HttpSender {
      * 获取统计信息
      */
     public Map<String, Integer> getStats() {
-        return Map.of(
-            "metrics_sent", metricsSent,
-            "metrics_failed", metricsFailed,
-            "logs_sent", logsSent,
-            "logs_failed", logsFailed
-        );
+        Map<String, Integer> stats = new java.util.HashMap<>();
+        stats.put("metrics_sent", metricsSent);
+        stats.put("metrics_failed", metricsFailed);
+        stats.put("logs_sent", logsSent);
+        stats.put("logs_failed", logsFailed);
+        return stats;
     }
 }

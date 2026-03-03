@@ -69,7 +69,7 @@ public class MetricsCollector {
         
         // JVM 内存
         try {
-            var runtime = Runtime.getRuntime();
+            Runtime runtime = Runtime.getRuntime();
             metrics.put("jvm_heap_max_mb", runtime.maxMemory() / MB);
             metrics.put("jvm_heap_used_mb", (runtime.maxMemory() - runtime.freeMemory()) / MB);
         } catch (Exception e) {

@@ -19,7 +19,7 @@ public class LogWatcher {
     private static final Logger logger = LoggerFactory.getLogger(LogWatcher.class);
     private static final int MAX_LOG_LENGTH = 1000;
     
-    private final List<Path> logPaths;
+    private List<Path> logPaths;  // 不能用 final，因为后续要动态添加新发现的文件
     private final Map<Path, Long> filePositions;
     private final Map<Path, Long> fileInodes;
     

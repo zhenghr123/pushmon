@@ -81,10 +81,10 @@ public class MetricsCollector {
         // 内存使用（基于 cgroup）
         try {
             Map<String, Long> memInfo = getCgroupMemoryInfo();
-            metrics.put("memory_used_mb", memInfo.get("used") / MB);
-            metrics.put("memory_limit_mb", memInfo.get("limit") / MB);
-            metrics.put("memory_usage_percent", 
-                       (memInfo.get("limit") > 0 && memInfo.get("limit") < 9223372036854771712L) ? 
+            metrics.put("memory_usage", memInfo.get("used") / MB);
+            metrics.put("memory_limit", memInfo.get("limit") / MB);
+            metrics.put("memory_percent",
+                       (memInfo.get("limit") > 0 && memInfo.get("limit") < 9223372036854771712L) ?
                        (memInfo.get("used") * 100.0 / memInfo.get("limit")) : -1);
         } catch (Exception e) {
             logger.debug("内存指标采集失败", e);

@@ -4,3 +4,8 @@ __pycache__/
 .env
 *.db
 *.log
+
+# Java
+agent-java/target/
+*.class
+*.jar

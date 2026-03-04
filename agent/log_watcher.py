@@ -48,7 +48,11 @@ class LogWatcher:
     - 增量读取，只采集新增日志
     - 自动检测文件轮转
     - 解析日志级别（ERROR/WARN/INFO/DEBUG）
+    - 文件大小限制，防止内存溢出
     """
+    
+    # 文件大小限制（默认 100MB）
+    MAX_FILE_SIZE = int(os.getenv('PUSHMON_MAX_LOG_FILE_SIZE', 100 * 1024 * 1024))
     
     # 常见日志级别匹配模式
     LEVEL_PATTERNS = [

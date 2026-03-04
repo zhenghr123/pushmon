@@ -22,6 +22,7 @@ public class LogWatcher {
     private List<Path> logPaths;  // 不能用 final，因为后续要动态添加新发现的文件
     private final Map<Path, Long> filePositions;
     private final Map<Path, Long> fileInodes;
+    private final String originalPattern;  // 保存原始路径模式，用于重试
     
     // 日志级别匹配
     private static final Pattern LOG_LEVEL_PATTERN = Pattern.compile(
@@ -30,10 +31,11 @@ public class LogWatcher {
     public LogWatcher(String logPathPattern) {
         this.filePositions = new ConcurrentHashMap<>();
         this.fileInodes = new ConcurrentHashMap<>();
-        
+        this.originalPattern = logPathPattern;  // 保存原始模式
+
         // 首次尝试展开路径
         this.logPaths = expandPathPattern(logPathPattern);
-        
+
         if (logPaths.isEmpty()) {
             logger.warn("LogWatcher 初始化：未找到匹配的日志文件（可能是业务尚未启动），将在后续采集中重试");
         } else {
@@ -96,19 +98,14 @@ public class LogWatcher {
         
         // 如果当前没有文件，尝试重新展开路径（可能是业务刚启动）
         if (currentPaths.isEmpty()) {
-            List<Path> refreshedPaths = new ArrayList<>();
-            for (Path path : logPaths) {
-                // 检查父目录是否存在
-                Path parent = path.getParent();
-                if (parent != null && Files.isDirectory(parent)) {
-                    // 父目录存在，尝试重新展开
-                    refreshedPaths.addAll(expandPathPattern(path.toString()));
-                }
-            }
+            logger.debug("当前没有日志文件，尝试重新展开路径模式：{}", originalPattern);
+            List<Path> refreshedPaths = expandPathPattern(originalPattern);
             if (!refreshedPaths.isEmpty()) {
                 logPaths = refreshedPaths;
                 logger.info("LogWatcher 发现新的日志文件：{} 个", refreshedPaths.size());
                 return collect(); // 递归调用采集
+            } else {
+                logger.debug("仍未找到匹配的日志文件");
             }
         }
         

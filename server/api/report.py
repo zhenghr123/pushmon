@@ -133,22 +133,27 @@ async def create_report(db: Session = Depends(get_db)):
     today = datetime.now().date()
     week_start = datetime.combine(today - timedelta(days=today.weekday()), datetime.min.time())
     week_end = week_start + timedelta(days=7)
-    
+
+    logger.info(f"开始生成周报，时间范围: {week_start} ~ {week_end}")
+
     # 检查是否已存在
     existing = db.query(WeeklyReport).filter(
         WeeklyReport.week_start == week_start
     ).first()
-    
+
     if existing:
+        logger.info("本周周报已存在")
         return {
             "status": "exists",
             "message": "本周周报已存在",
             "report": existing.to_dict()
         }
-    
+
     # 生成周报
     report_data = generate_weekly_report(db, week_start, week_end)
-    
+
+    logger.info(f"周报数据统计: {report_data['stats']}")
+
     report = WeeklyReport(
         week_start=week_start,
         week_end=week_end,
@@ -156,13 +161,53 @@ async def create_report(db: Session = Depends(get_db)):
         content=report_data["content"],
         stats=str(report_data["stats"])
     )
-    
+
     db.add(report)
     db.commit()
-    
+
+    logger.info("周报生成成功")
+
     return {
         "status": "success",
         "message": "周报生成成功",
+        "report": report.to_dict()
+    }
+
+
+@router.post("/generate/custom")
+async def create_custom_report(
+    days: int = Query(7, ge=1, le=30, description="统计最近N天的数据"),
+    db: Session = Depends(get_db)
+):
+    """生成自定义时间范围的周报（用于测试）"""
+    # 计算时间范围
+    today = datetime.now().date()
+    week_start = datetime.combine(today - timedelta(days=days), datetime.min.time())
+    week_end = datetime.now()
+
+    logger.info(f"开始生成自定义周报，时间范围: {week_start} ~ {week_end} (最近{days}天)")
+
+    # 生成周报
+    report_data = generate_weekly_report(db, week_start, week_end)
+
+    logger.info(f"周报数据统计: {report_data['stats']}")
+
+    report = WeeklyReport(
+        week_start=week_start,
+        week_end=week_end,
+        title=f"运维周报 {week_start.strftime('%Y-%m-%d')} (最近{days}天)",
+        content=report_data["content"],
+        stats=str(report_data["stats"])
+    )
+
+    db.add(report)
+    db.commit()
+
+    logger.info("自定义周报生成成功")
+
+    return {
+        "status": "success",
+        "message": f"周报生成成功（最近{days}天）",
         "report": report.to_dict()
     }
 

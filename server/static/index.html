@@ -159,9 +159,17 @@
                 <div class="bg-gray-800 rounded-xl p-4">
                     <div class="flex justify-between items-center mb-4">
                         <h2 class="text-lg font-semibold">运维周报</h2>
-                        <button @click="generateReport" class="bg-green-600 px-4 py-2 rounded text-sm">
-                            生成本周周报
-                        </button>
+                        <div class="flex gap-2">
+                            <button @click="generateCustomReport(1)" class="bg-blue-600 px-3 py-2 rounded text-sm">
+                                生成今日周报
+                            </button>
+                            <button @click="generateCustomReport(3)" class="bg-blue-600 px-3 py-2 rounded text-sm">
+                                生成3天周报
+                            </button>
+                            <button @click="generateReport" class="bg-green-600 px-4 py-2 rounded text-sm">
+                                生成本周周报
+                            </button>
+                        </div>
                     </div>
                     <div v-if="currentReport" class="prose prose-invert max-w-none">
                         <pre class="whitespace-pre-wrap text-sm bg-gray-900 p-4 rounded">{{ currentReport.content }}</pre>
@@ -240,9 +248,39 @@
 
             const generateReport = async () => {
                 try {
-                    await fetch('/api/report/generate', { method: 'POST' });
-                    fetchReport();
-                } catch (e) { console.error(e); }
+                    const res = await fetch('/api/report/generate', { method: 'POST' });
+                    const data = await res.json();
+
+                    if (data.status === 'success') {
+                        alert('周报生成成功！');
+                        fetchReport();
+                    } else if (data.status === 'exists') {
+                        alert('本周周报已存在，正在显示...');
+                        fetchReport();
+                    } else {
+                        alert('周报生成失败：' + data.message);
+                    }
+                } catch (e) {
+                    console.error(e);
+                    alert('周报生成失败，请检查网络连接');
+                }
+            };
+
+            const generateCustomReport = async (days) => {
+                try {
+                    const res = await fetch(`/api/report/generate/custom?days=${days}`, { method: 'POST' });
+                    const data = await res.json();
+
+                    if (data.status === 'success') {
+                        alert(`周报生成成功（最近${days}天）！`);
+                        fetchReport();
+                    } else {
+                        alert('周报生成失败：' + data.message);
+                    }
+                } catch (e) {
+                    console.error(e);
+                    alert('周报生成失败，请检查网络连接');
+                }
             };
 
             const fetchReport = async () => {
@@ -415,11 +453,11 @@
                 window.removeEventListener('resize', handleResize);
             });
 
-            return { 
-                tabs, currentTab, containers, summary, logStats, logs, 
+            return {
+                tabs, currentTab, containers, summary, logStats, logs,
                 currentReport, logFilter, selectedContainer, onlineContainers,
-                fetchData, fetchLogs, generateReport, renderCharts, 
-                formatTime, getLevelClass, getMemoryClass 
+                fetchData, fetchLogs, generateReport, generateCustomReport, renderCharts,
+                formatTime, getLevelClass, getMemoryClass
             };
         }
     }).mount('#app');

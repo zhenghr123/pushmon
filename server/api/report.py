@@ -130,7 +130,7 @@ def generate_weekly_report(db: Session, week_start: datetime, week_end: datetime
 async def create_report(db: Session = Depends(get_db)):
     """生成本周周报"""
     # 计算本周起止时间
-    today = datetime.utcnow().date()
+    today = datetime.now().date()
     week_start = datetime.combine(today - timedelta(days=today.weekday()), datetime.min.time())
     week_end = week_start + timedelta(days=7)
     

@@ -47,7 +47,7 @@ class ContainerMetric(Base):
     disk_percent = Column(Float, default=None, comment='磁盘使用率 (%)')
     
     # 元数据
-    created_at = Column(DateTime, default=datetime.utcnow, comment='记录创建时间')
+    created_at = Column(DateTime, default=datetime.now, comment='记录创建时间')
     
     # 索引
     __table_args__ = (
@@ -84,7 +84,7 @@ class LogEntry(Base):
     container_name = Column(String(255), nullable=False, index=True, comment='容器名称')
     
     # 时间戳
-    timestamp = Column(DateTime, default=datetime.utcnow, index=True, comment='日志时间')
+    timestamp = Column(DateTime, default=datetime.now, index=True, comment='日志时间')
     
     # 日志级别
     level = Column(String(20), nullable=False, index=True, comment='日志级别')
@@ -96,7 +96,7 @@ class LogEntry(Base):
     source_file = Column(String(500), default=None, comment='来源文件名')
     
     # 元数据
-    created_at = Column(DateTime, default=datetime.utcnow, comment='记录创建时间')
+    created_at = Column(DateTime, default=datetime.now, comment='记录创建时间')
     
     # 索引
     __table_args__ = (
@@ -146,11 +146,11 @@ class AlertEvent(Base):
     status = Column(String(20), default='active', index=True, comment='状态: active, resolved, acknowledged')
     
     # 时间戳
-    triggered_at = Column(DateTime, default=datetime.utcnow, index=True, comment='触发时间')
+    triggered_at = Column(DateTime, default=datetime.now, index=True, comment='触发时间')
     resolved_at = Column(DateTime, default=None, comment='解决时间')
     
     # 元数据
-    created_at = Column(DateTime, default=datetime.utcnow, comment='记录创建时间')
+    created_at = Column(DateTime, default=datetime.now, comment='记录创建时间')
     
     def to_dict(self):
         """转换为字典"""
@@ -196,7 +196,7 @@ class WeeklyReport(Base):
     sent_at = Column(DateTime, default=None, comment='发送时间')
     
     # 元数据
-    created_at = Column(DateTime, default=datetime.utcnow, comment='记录创建时间')
+    created_at = Column(DateTime, default=datetime.now, comment='记录创建时间')
     
     def to_dict(self):
         """转换为字典"""
@@ -227,14 +227,14 @@ class ContainerInfo(Base):
     container_name = Column(String(255), unique=True, nullable=False, comment='容器名称')
     
     # 最后上报时间
-    last_seen = Column(DateTime, default=datetime.utcnow, index=True, comment='最后上报时间')
-    
+    last_seen = Column(DateTime, default=datetime.now, index=True, comment='最后上报时间')
+
     # 状态
     status = Column(String(20), default='online', comment='状态: online, offline')
-    
+
     # 元数据
-    first_seen = Column(DateTime, default=datetime.utcnow, comment='首次发现时间')
-    created_at = Column(DateTime, default=datetime.utcnow, comment='记录创建时间')
+    first_seen = Column(DateTime, default=datetime.now, comment='首次发现时间')
+    created_at = Column(DateTime, default=datetime.now, comment='记录创建时间')
     
     def to_dict(self):
         """转换为字典"""
@@ -287,7 +287,7 @@ if __name__ == '__main__':
     try:
         metric = ContainerMetric(
             container_name='test-container',
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(),
             cpu_usage=25.5,
             memory_usage=512.0,
             memory_limit=1024.0,

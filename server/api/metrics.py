@@ -77,7 +77,7 @@ async def upload_metrics(metric: MetricUpload, db: Session = Depends(get_db)):
         if metric.timestamp:
             timestamp = datetime.fromtimestamp(metric.timestamp / 1000)
         else:
-            timestamp = datetime.utcnow()
+            timestamp = datetime.now()
         
         # 创建指标记录
         db_metric = ContainerMetric(
@@ -99,12 +99,12 @@ async def upload_metrics(metric: MetricUpload, db: Session = Depends(get_db)):
         ).first()
         
         if container_info:
-            container_info.last_seen = datetime.utcnow()
+            container_info.last_seen = datetime.now()
             container_info.status = 'online'
         else:
             container_info = ContainerInfo(
                 container_name=metric.container_name,
-                last_seen=datetime.utcnow(),
+                last_seen=datetime.now(),
                 status='online'
             )
             db.add(container_info)
@@ -171,7 +171,7 @@ async def list_containers(db: Session = Depends(get_db)):
     containers = db.query(ContainerInfo).all()
     
     # 检查在线状态（超过 60 秒未上报视为离线）
-    threshold = datetime.utcnow() - timedelta(seconds=60)
+    threshold = datetime.now() - timedelta(seconds=60)
     
     result = []
     for c in containers:
@@ -213,7 +213,7 @@ async def get_metric_history(
     Returns:
         Dict: 指标历史数据（用于图表渲染）
     """
-    start_time = datetime.utcnow() - timedelta(hours=hours)
+    start_time = datetime.now() - timedelta(hours=hours)
     
     metrics = db.query(ContainerMetric).filter(
         ContainerMetric.container_name == container_name,
@@ -244,20 +244,20 @@ async def get_metric_history(
 async def get_metrics_summary(db: Session = Depends(get_db)):
     """
     获取指标摘要统计
-    
+
     Args:
         db: 数据库会话
-    
+
     Returns:
         Dict: 摘要统计
     """
     # 获取最近 1 小时的数据
     start_time = datetime.utcnow() - timedelta(hours=1)
-    
+
     metrics = db.query(ContainerMetric).filter(
         ContainerMetric.timestamp >= start_time
     ).all()
-    
+
     if not metrics:
         return {
             "total_containers": 0,
@@ -266,7 +266,9 @@ async def get_metrics_summary(db: Session = Depends(get_db)):
             "max_cpu": 0,
             "max_memory": 0
         }
-    
+
+    logger.info(f"查询到 {len(metrics)} 条指标数据，时间范围: {start_time} 到现在")
+
     # 按容器分组计算平均值
     container_stats = {}
     for m in metrics:
@@ -276,16 +278,36 @@ async def get_metrics_summary(db: Session = Depends(get_db)):
             }
         container_stats[m.container_name]['cpu'].append(m.cpu_usage)
         container_stats[m.container_name]['memory'].append(m.memory_usage)
-    
-    # 计算总体统计
+
+    # 计算每个容器的平均值
+    container_avg_cpu = []
+    container_avg_memory = []
+    for container_name, stats in container_stats.items():
+        if stats['cpu']:
+            avg_cpu = sum(stats['cpu']) / len(stats['cpu'])
+            container_avg_cpu.append(avg_cpu)
+            logger.info(f"容器 {container_name}: CPU数据点={len(stats['cpu'])}, 平均CPU={avg_cpu:.2f}%")
+        if stats['memory']:
+            avg_mem = sum(stats['memory']) / len(stats['memory'])
+            container_avg_memory.append(avg_mem)
+            logger.info(f"容器 {container_name}: 内存数据点={len(stats['memory'])}, 平均内存={avg_mem:.2f}MB")
+
+    # 计算总体统计（基于容器平均值的平均）
     all_cpu = [m.cpu_usage for m in metrics]
     all_memory = [m.memory_usage for m in metrics]
-    
+
+    final_avg_cpu = round(sum(container_avg_cpu) / len(container_avg_cpu), 2) if container_avg_cpu else 0
+    final_avg_memory = round(sum(container_avg_memory) / len(container_avg_memory), 2) if container_avg_memory else 0
+
+    logger.info(f"最终统计: 容器数={len(container_stats)}, 平均CPU={final_avg_cpu}%, 平均内存={final_avg_memory}MB")
+    logger.info(f"容器CPU平均值列表: {[f'{x:.2f}' for x in container_avg_cpu]}")
+    logger.info(f"容器内存平均值列表: {[f'{x:.2f}' for x in container_avg_memory]}")
+
     return {
         "total_containers": len(container_stats),
         "total_data_points": len(metrics),
-        "avg_cpu": round(sum(all_cpu) / len(all_cpu), 2) if all_cpu else 0,
-        "avg_memory": round(sum(all_memory) / len(all_memory), 2) if all_memory else 0,
+        "avg_cpu": final_avg_cpu,
+        "avg_memory": final_avg_memory,
         "max_cpu": round(max(all_cpu), 2) if all_cpu else 0,
         "max_memory": round(max(all_memory), 2) if all_memory else 0,
         "containers": list(container_stats.keys())

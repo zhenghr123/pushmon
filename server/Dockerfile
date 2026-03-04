@@ -3,6 +3,10 @@
 
 FROM python:3.11-slim
 
+# 设置时区为上海时间
+ENV TZ=Asia/Shanghai
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
 WORKDIR /app
 
 # 复制依赖文件

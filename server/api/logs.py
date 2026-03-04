@@ -58,7 +58,7 @@ async def upload_logs(data: LogUpload, db: Session = Depends(get_db)):
         received = 0
         for log in data.logs:
             # 解析时间戳
-            ts = datetime.utcnow()
+            ts = datetime.now()
             if log.get('timestamp'):
                 try:
                     ts = datetime.strptime(log['timestamp'], '%Y-%m-%d %H:%M:%S')
@@ -118,7 +118,7 @@ async def get_log_stats(
     db: Session = Depends(get_db)
 ):
     """获取日志统计"""
-    start_time = datetime.utcnow() - timedelta(hours=hours)
+    start_time = datetime.now() - timedelta(hours=hours)
     
     logs = db.query(LogEntry).filter(LogEntry.timestamp >= start_time).all()
     

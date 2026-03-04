@@ -9,3 +9,6 @@ __pycache__/
 agent-java/target/
 *.class
 *.jar
+
+# IDE
+.idea/

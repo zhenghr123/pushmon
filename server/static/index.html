@@ -32,11 +32,24 @@
         <main class="max-w-7xl mx-auto px-4 py-6">
             <!-- 概览页 -->
             <div v-if="currentTab === 'overview'">
+                <!-- 容器选择器 -->
+                <div class="mb-4 flex items-center space-x-4">
+                    <label class="text-gray-400">选择容器:</label>
+                    <select v-model="selectedContainer" @change="renderCharts"
+                            class="bg-gray-700 rounded px-3 py-2 text-sm min-w-[200px]">
+                        <option value="">全部容器概览</option>
+                        <option v-for="c in containers" :key="c.container_name" :value="c.container_name">
+                            {{ c.container_name }}
+                        </option>
+                    </select>
+                    <span class="text-gray-500 text-sm">数据每 30 秒自动刷新</span>
+                </div>
+
                 <!-- 统计卡片 -->
                 <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
                     <div class="bg-gray-800 rounded-xl p-4">
                         <div class="text-gray-400 text-sm">在线容器</div>
-                        <div class="text-3xl font-bold text-green-400">{{ containers.length }}</div>
+                        <div class="text-3xl font-bold text-green-400">{{ onlineContainers }}</div>
                     </div>
                     <div class="bg-gray-800 rounded-xl p-4">
                         <div class="text-gray-400 text-sm">平均 CPU</div>
@@ -63,20 +76,29 @@
                                     <th class="text-left py-2 px-3">状态</th>
                                     <th class="text-left py-2 px-3">CPU</th>
                                     <th class="text-left py-2 px-3">内存</th>
+                                    <th class="text-left py-2 px-3">内存限制</th>
+                                    <th class="text-left py-2 px-3">内存%</th>
                                     <th class="text-left py-2 px-3">最后上报</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <tr v-for="c in containers" :key="c.container_name" 
-                                    class="border-b border-gray-700 hover:bg-gray-700/50">
+                                    class="border-b border-gray-700 hover:bg-gray-700/50 cursor-pointer"
+                                    @click="selectedContainer = c.container_name; renderCharts()">
                                     <td class="py-2 px-3">{{ c.container_name }}</td>
                                     <td class="py-2 px-3">
                                         <span :class="c.status === 'online' ? 'text-green-400' : 'text-red-400'">
                                             ● {{ c.status }}
                                         </span>
                                     </td>
-                                    <td class="py-2 px-3">{{ c.latest_metrics?.cpu_usage || 0 }}%</td>
-                                    <td class="py-2 px-3">{{ c.latest_metrics?.memory_usage || 0 }} MB</td>
+                                    <td class="py-2 px-3">{{ (c.latest_metrics?.cpu_usage || 0).toFixed(1) }}%</td>
+                                    <td class="py-2 px-3">{{ (c.latest_metrics?.memory_usage || 0).toFixed(0) }} MB</td>
+                                    <td class="py-2 px-3 text-gray-400">{{ (c.latest_metrics?.memory_limit || 0).toFixed(0) }} MB</td>
+                                    <td class="py-2 px-3">
+                                        <span :class="getMemoryClass(c.latest_metrics?.memory_percent)">
+                                            {{ (c.latest_metrics?.memory_percent || 0).toFixed(1) }}%
+                                        </span>
+                                    </td>
                                     <td class="py-2 px-3 text-gray-400 text-sm">{{ formatTime(c.last_seen) }}</td>
                                 </tr>
                             </tbody>
@@ -87,11 +109,11 @@
                 <!-- 图表 -->
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div class="bg-gray-800 rounded-xl p-4">
-                        <h3 class="text-lg font-semibold mb-4">CPU 使用率趋势</h3>
+                        <h3 class="text-lg font-semibold mb-4">CPU 使用率趋势 <span class="text-sm text-gray-400">(最近 1 小时)</span></h3>
                         <div id="cpuChart" class="h-64"></div>
                     </div>
                     <div class="bg-gray-800 rounded-xl p-4">
-                        <h3 class="text-lg font-semibold mb-4">内存使用趋势</h3>
+                        <h3 class="text-lg font-semibold mb-4">内存使用趋势 <span class="text-sm text-gray-400">(最近 1 小时)</span></h3>
                         <div id="memChart" class="h-64"></div>
                     </div>
                 </div>
@@ -103,6 +125,12 @@
                     <div class="flex justify-between items-center mb-4">
                         <h2 class="text-lg font-semibold">日志查询</h2>
                         <div class="flex space-x-2">
+                            <select v-model="logFilter.container" class="bg-gray-700 rounded px-3 py-1 text-sm">
+                                <option value="">所有容器</option>
+                                <option v-for="c in containers" :key="c.container_name" :value="c.container_name">
+                                    {{ c.container_name }}
+                                </option>
+                            </select>
                             <select v-model="logFilter.level" class="bg-gray-700 rounded px-3 py-1 text-sm">
                                 <option value="">所有级别</option>
                                 <option value="ERROR">ERROR</option>
@@ -147,7 +175,7 @@
     </div>
 
     <script>
-    const { createApp, ref, onMounted } = Vue;
+    const { createApp, ref, computed, onMounted, onUnmounted } = Vue;
 
     createApp({
         setup() {
@@ -163,12 +191,28 @@
             const logs = ref([]);
             const currentReport = ref(null);
             const logFilter = ref({ level: '', keyword: '', container: '' });
+            const selectedContainer = ref('');
+            
+            // ECharts 实例
+            let cpuChart = null;
+            let memChart = null;
+            let refreshInterval = null;
+
+            // 计算在线容器数
+            const onlineContainers = computed(() => {
+                return containers.value.filter(c => c.status === 'online').length;
+            });
 
             const fetchData = async () => {
                 try {
                     const res = await fetch('/api/metrics/containers');
                     const data = await res.json();
                     containers.value = data.containers || [];
+                    
+                    // 如果没有选中容器，默认选中第一个
+                    if (!selectedContainer.value && containers.value.length > 0) {
+                        selectedContainer.value = containers.value[0].container_name;
+                    }
                 } catch (e) { console.error(e); }
 
                 try {
@@ -186,6 +230,7 @@
                 let url = `/api/logs/list?limit=200`;
                 if (logFilter.value.level) url += `&level=${logFilter.value.level}`;
                 if (logFilter.value.keyword) url += `&keyword=${logFilter.value.keyword}`;
+                if (logFilter.value.container) url += `&container=${logFilter.value.container}`;
                 try {
                     const res = await fetch(url);
                     const data = await res.json();
@@ -208,6 +253,116 @@
                 } catch (e) { console.error(e); }
             };
 
+            // 渲染图表
+            const renderCharts = async () => {
+                const containerName = selectedContainer.value;
+                if (!containerName) return;
+
+                try {
+                    const res = await fetch(`/api/metrics/history/${containerName}?hours=1`);
+                    const data = await res.json();
+                    
+                    // 格式化时间
+                    const times = data.timestamps.map(t => {
+                        const date = new Date(t);
+                        return date.getHours().toString().padStart(2, '0') + ':' + 
+                               date.getMinutes().toString().padStart(2, '0');
+                    });
+
+                    // 初始化或获取图表实例
+                    const cpuDom = document.getElementById('cpuChart');
+                    const memDom = document.getElementById('memChart');
+                    
+                    if (!cpuDom || !memDom) return;
+
+                    if (!cpuChart) {
+                        cpuChart = echarts.init(cpuDom);
+                    }
+                    if (!memChart) {
+                        memChart = echarts.init(memDom);
+                    }
+
+                    // CPU 图表配置
+                    cpuChart.setOption({
+                        tooltip: {
+                            trigger: 'axis',
+                            formatter: '{b}<br/>CPU: {c}%'
+                        },
+                        grid: {
+                            left: '3%', right: '4%', bottom: '3%', top: '10%',
+                            containLabel: true
+                        },
+                        xAxis: {
+                            type: 'category',
+                            data: times,
+                            axisLabel: { color: '#9CA3AF', fontSize: 10 }
+                        },
+                        yAxis: {
+                            type: 'value',
+                            name: 'CPU %',
+                            nameTextStyle: { color: '#9CA3AF' },
+                            axisLabel: { color: '#9CA3AF' },
+                            splitLine: { lineStyle: { color: '#374151' } }
+                        },
+                        series: [{
+                            type: 'line',
+                            data: data.cpu_usage,
+                            smooth: true,
+                            symbol: 'none',
+                            areaStyle: {
+                                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                    { offset: 0, color: 'rgba(59, 130, 246, 0.4)' },
+                                    { offset: 1, color: 'rgba(59, 130, 246, 0.05)' }
+                                ])
+                            },
+                            lineStyle: { color: '#3B82F6', width: 2 },
+                            itemStyle: { color: '#3B82F6' }
+                        }]
+                    });
+
+                    // 内存图表配置
+                    memChart.setOption({
+                        tooltip: {
+                            trigger: 'axis',
+                            formatter: '{b}<br/>内存: {c} MB'
+                        },
+                        grid: {
+                            left: '3%', right: '4%', bottom: '3%', top: '10%',
+                            containLabel: true
+                        },
+                        xAxis: {
+                            type: 'category',
+                            data: times,
+                            axisLabel: { color: '#9CA3AF', fontSize: 10 }
+                        },
+                        yAxis: {
+                            type: 'value',
+                            name: '内存 MB',
+                            nameTextStyle: { color: '#9CA3AF' },
+                            axisLabel: { color: '#9CA3AF' },
+                            splitLine: { lineStyle: { color: '#374151' } }
+                        },
+                        series: [{
+                            type: 'line',
+                            data: data.memory_usage,
+                            smooth: true,
+                            symbol: 'none',
+                            areaStyle: {
+                                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                    { offset: 0, color: 'rgba(168, 85, 247, 0.4)' },
+                                    { offset: 1, color: 'rgba(168, 85, 247, 0.05)' }
+                                ])
+                            },
+                            lineStyle: { color: '#A855F7', width: 2 },
+                            itemStyle: { color: '#A855F7' }
+                        }]
+                    });
+
+                } catch (e) {
+                    console.error('渲染图表失败:', e);
+                }
+            };
+
             const formatTime = (t) => {
                 if (!t) return '-';
                 return new Date(t).toLocaleString('zh-CN');
@@ -220,14 +375,52 @@
                 'bg-gray-500/20 text-gray-400': level === 'DEBUG'
             }[level] || 'bg-gray-500/20 text-gray-400');
 
+            const getMemoryClass = (percent) => {
+                if (!percent) return 'text-gray-400';
+                if (percent > 80) return 'text-red-400 font-bold';
+                if (percent > 60) return 'text-yellow-400';
+                return 'text-green-400';
+            };
+
+            // 窗口大小变化时重新调整图表
+            const handleResize = () => {
+                cpuChart && cpuChart.resize();
+                memChart && memChart.resize();
+            };
+
             onMounted(() => {
                 fetchData();
                 fetchLogs();
                 fetchReport();
-                setInterval(fetchData, 30000);
+                
+                // 延迟渲染图表（等待 DOM 就绪）
+                setTimeout(() => {
+                    renderCharts();
+                }, 100);
+
+                // 定时刷新
+                refreshInterval = setInterval(() => {
+                    fetchData();
+                    renderCharts();
+                }, 30000);
+
+                // 监听窗口大小变化
+                window.addEventListener('resize', handleResize);
             });
 
-            return { tabs, currentTab, containers, summary, logStats, logs, currentReport, logFilter, fetchData, fetchLogs, generateReport, formatTime, getLevelClass };
+            onUnmounted(() => {
+                if (refreshInterval) clearInterval(refreshInterval);
+                if (cpuChart) cpuChart.dispose();
+                if (memChart) memChart.dispose();
+                window.removeEventListener('resize', handleResize);
+            });
+
+            return { 
+                tabs, currentTab, containers, summary, logStats, logs, 
+                currentReport, logFilter, selectedContainer, onlineContainers,
+                fetchData, fetchLogs, generateReport, renderCharts, 
+                formatTime, getLevelClass, getMemoryClass 
+            };
         }
     }).mount('#app');
     </script>
